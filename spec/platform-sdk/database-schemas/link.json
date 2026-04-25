@@ -1,0 +1,121 @@
+{
+  "id": "102019b6141c7dd71ffbe48d974ad27ce33",
+  "version": "102019b6141c7dd716ab80f32d56cfc6076",
+  "schema": {
+    "name": "link",
+    "description": "Entity representing a personal link with URL, custom display name, and tracking timestamps for creation and updates",
+    "fields": [
+      {
+        "name": "id",
+        "description": "Unique identifier for each link record",
+        "type": 1,
+        "compliance": {
+          "confidentiality": 2,
+          "reason": "Internal identifier for link management, not publicly exposed"
+        }
+      },
+      {
+        "name": "data_creator",
+        "description": "id of the user who creates the record",
+        "type": 1,
+        "compliance": {
+          "confidentiality": 2,
+          "reason": "Internal user identifier for audit trail purposes"
+        }
+      },
+      {
+        "name": "data_updater",
+        "description": "id of the user who updates the record",
+        "type": 1,
+        "compliance": {
+          "confidentiality": 2,
+          "reason": "Internal user identifier for audit trail purposes"
+        }
+      },
+      {
+        "name": "create_time",
+        "description": "create time in timestamp unix",
+        "type": 1,
+        "compliance": {
+          "confidentiality": 2,
+          "reason": "Internal timestamp for record tracking and audit purposes"
+        },
+        "format": "timestamp"
+      },
+      {
+        "name": "update_time",
+        "description": "update time in timestamp unix",
+        "type": 1,
+        "compliance": {
+          "confidentiality": 2,
+          "reason": "Internal timestamp for record tracking and audit purposes"
+        },
+        "format": "timestamp"
+      },
+      {
+        "name": "url",
+        "description": "The actual URL link stored in the system",
+        "type": 1,
+        "compliance": {
+          "confidentiality": 2,
+          "reason": "Personal link data that should be kept internal to the user"
+        },
+        "pattern": "^https?://.*"
+      },
+      {
+        "name": "display_name",
+        "description": "Custom name or title for the link to display in the interface",
+        "type": 1,
+        "compliance": {
+          "confidentiality": 2,
+          "reason": "Personal label data that should be kept internal to the user"
+        }
+      }
+    ],
+    "indexes": [
+      {
+        "fields": [
+          "id"
+        ],
+        "unique": true,
+        "primary": true
+      },
+      {
+        "fields": [
+          "data_creator"
+        ]
+      },
+      {
+        "fields": [
+          "data_updater"
+        ]
+      },
+      {
+        "fields": [
+          "create_time",
+          "data_creator"
+        ],
+        "order": true
+      },
+      {
+        "fields": [
+          "data_creator",
+          "display_name"
+        ]
+      }
+    ]
+  },
+  "task": {
+    "id": "6950313a5b551409b7ff44aa",
+    "root": "6950313a5b551409b7ff44aa",
+    "project": "6950313a5b551409b7ff44a9",
+    "user": "a86113e0-e051-7057-f061-ac4bd91b9db8"
+  },
+  "namespace": {
+    "id": "01987547fc6c72ecb453bd2736bd4ea0",
+    "tenant": 2,
+    "name": "global-1",
+    "default": true
+  },
+  "revision": 1
+}
