@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,13 +13,13 @@ import {
 	ExternalLinkIcon,
 	CopyIcon,
 	LinkIcon,
-	LockIcon,
+	MailIcon,
 	GithubIcon,
-	SettingsIcon,
 	UploadIcon,
 	DownloadIcon,
 	CheckCircle2Icon,
 	XCircleIcon,
+	SendIcon,
 } from "lucide-react";
 import { localLinkStore, type LinkModel } from "@/lib/local-storage";
 import { APP_CONFIG } from "@/config";
@@ -32,12 +32,17 @@ import {
 	clearGitHubConfig,
 	type GitHubConfig,
 } from "@/lib/github-sync";
+import {
+	isAllowedEmail,
+	createMagicToken,
+	verifyMagicToken,
+	sendMagicLinkEmail,
+	clearMagicToken,
+} from "@/lib/magic-link";
 
 export const Route = createFileRoute("/")({
 	component: App,
 });
-
-const CORRECT_PASSWORD = APP_CONFIG.password;
 
 // Helper function to get icon element based on link name
 function getIconForLink(name: string): ReactNode {
@@ -120,7 +125,14 @@ function getIconForLink(name: string): ReactNode {
 }
 
 function App() {
-	const [isAuthenticated, setIsAuthenticated] = useState(false);
+	// auth steps: 'email' | 'password' | 'authenticated'
+	const [authStep, setAuthStep] = useState<"email" | "password" | "authenticated">("email");
+	// Magic link state
+	const [emailInput, setEmailInput] = useState("");
+	const [magicLinkSent, setMagicLinkSent] = useState(false);
+	const [magicLinkError, setMagicLinkError] = useState("");
+	const [isSendingLink, setIsSendingLink] = useState(false);
+	// Password step state
 	const [passwordInput, setPasswordInput] = useState("");
 	const [passwordError, setPasswordError] = useState(false);
 	const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -145,18 +157,41 @@ function App() {
 
 	const queryClient = useQueryClient();
 
+	// On mount: check URL for magic token and verify it
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const token = params.get("magic_token");
+		if (token) {
+			// Clean the token from URL immediately
+			const url = new URL(window.location.href);
+			url.searchParams.delete("magic_token");
+			window.history.replaceState({}, document.title, url.toString());
+
+			if (verifyMagicToken(token)) {
+				// Magic link valid — move to password step
+				setAuthStep("password");
+				const config = getGitHubConfig();
+				if (config) {
+					setGitHubConfig(config);
+					setGitHubToken(config.token);
+					setGitHubOwner(config.owner);
+					setGitHubRepo(config.repo);
+				}
+			}
+		}
+	}, []);
+
 	// Fetch all links from localStorage
 	const { data: links = [], isLoading } = useQuery({
 		queryKey: ["links"],
 		queryFn: () => localLinkStore.getAll(),
-		enabled: isAuthenticated,
+		enabled: authStep === "authenticated",
 	});
 
-	// Add link mutation — saves to localStorage
+	// Add link mutation
 	const addLinkMutation = useMutation({
-		mutationFn: (data: { url: string; display_name: string }) => {
-			return Promise.resolve(localLinkStore.insert(data));
-		},
+		mutationFn: (data: { url: string; display_name: string }) =>
+			Promise.resolve(localLinkStore.insert(data)),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["links"] });
 			setIsAddDialogOpen(false);
@@ -165,11 +200,10 @@ function App() {
 		},
 	});
 
-	// Update link mutation — saves to localStorage
+	// Update link mutation
 	const updateLinkMutation = useMutation({
-		mutationFn: (data: LinkModel) => {
-			return Promise.resolve(localLinkStore.update(data.id, { url: data.url, display_name: data.display_name }));
-		},
+		mutationFn: (data: LinkModel) =>
+			Promise.resolve(localLinkStore.update(data.id, { url: data.url, display_name: data.display_name })),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["links"] });
 			setIsEditDialogOpen(false);
@@ -179,12 +213,9 @@ function App() {
 		},
 	});
 
-	// Delete link mutation — removes from localStorage
+	// Delete link mutation
 	const deleteLinkMutation = useMutation({
-		mutationFn: (id: string) => {
-			localLinkStore.delete(id);
-			return Promise.resolve();
-		},
+		mutationFn: (id: string) => { localLinkStore.delete(id); return Promise.resolve(); },
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["links"] });
 		},
@@ -260,19 +291,36 @@ function App() {
 		setExpandedLinkId(expandedLinkId === linkId ? null : linkId);
 	};
 
+	const handleRequestMagicLink = async (e: React.FormEvent) => {
+		e.preventDefault();
+		setMagicLinkError("");
+
+		if (!isAllowedEmail(emailInput)) {
+			setMagicLinkError("This email is not authorized.");
+			return;
+		}
+
+		setIsSendingLink(true);
+		try {
+			const token = createMagicToken(emailInput);
+			if (!token) {
+				setMagicLinkError("Failed to generate magic link.");
+				return;
+			}
+			await sendMagicLinkEmail(emailInput, token);
+			setMagicLinkSent(true);
+		} catch (err) {
+			setMagicLinkError(err instanceof Error ? err.message : "Failed to send email.");
+		} finally {
+			setIsSendingLink(false);
+		}
+	};
+
 	const handlePasswordSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
-		if (passwordInput === CORRECT_PASSWORD) {
-			setIsAuthenticated(true);
+		if (passwordInput === (import.meta.env.VITE_APP_PASSWORD || "pass.word.admin.mode")) {
+			setAuthStep("authenticated");
 			setPasswordError(false);
-			// Load GitHub config on login
-			const config = getGitHubConfig();
-			if (config) {
-				setGitHubConfig(config);
-				setGitHubToken(config.token);
-				setGitHubOwner(config.owner);
-				setGitHubRepo(config.repo);
-			}
 		} else {
 			setPasswordError(true);
 			setPasswordInput("");
@@ -369,7 +417,6 @@ function App() {
 
 		try {
 			const restoredLinks = await restoreFromGitHub(gitHubConfig);
-			// Clear and restore
 			localStorage.setItem("akash_links_v1", JSON.stringify(restoredLinks));
 			queryClient.invalidateQueries({ queryKey: ["links"] });
 			setSyncStatus({ type: "success", message: `Restored ${restoredLinks.length} links from GitHub!` });
@@ -385,19 +432,96 @@ function App() {
 	};
 
 	// Password screen
-	if (!isAuthenticated) {
+	if (authStep === "email") {
 		return (
 			<div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50 flex items-center justify-center px-4">
 				<Card className="w-full max-w-md bg-white shadow-xl">
 					<CardHeader className="text-center pb-3">
 						<div className="flex justify-center mb-4">
 							<div className="bg-blue-100 p-4 rounded-full">
-								<LockIcon className="size-8 text-blue-600" />
+								<MailIcon className="size-8 text-blue-600" />
 							</div>
 						</div>
 						<CardTitle className="text-2xl font-bold text-slate-900">Secure Access</CardTitle>
 						<CardDescription className="text-slate-600 mt-2">
-							Enter your password to access your links
+							{magicLinkSent
+								? "Check your inbox for the magic link."
+								: "Enter your email to receive a one-time login link."}
+						</CardDescription>
+					</CardHeader>
+					<CardContent>
+						{magicLinkSent ? (
+							<div className="text-center space-y-4">
+								<div className="flex justify-center">
+									<CheckCircle2Icon className="size-12 text-green-500" />
+								</div>
+								<p className="text-slate-600 text-sm">
+									A magic link was sent to <span className="font-medium text-slate-900">{emailInput}</span>.
+									It expires in 15 minutes and can only be used once.
+								</p>
+								<Button
+									variant="outline"
+									className="w-full border-slate-300 text-slate-700"
+									onClick={() => {
+										setMagicLinkSent(false);
+										setEmailInput("");
+									}}
+								>
+									Use a different email
+								</Button>
+							</div>
+						) : (
+							<form onSubmit={handleRequestMagicLink} className="space-y-4">
+								<div className="space-y-2">
+									<Label htmlFor="email" className="text-slate-700">
+										Email address
+									</Label>
+									<Input
+										id="email"
+										type="email"
+										placeholder="your@email.com"
+										value={emailInput}
+										onChange={(e) => {
+											setEmailInput(e.target.value);
+											setMagicLinkError("");
+										}}
+										className={`border-slate-300 focus:border-blue-500 ${magicLinkError ? "border-red-500 focus:border-red-500" : ""}`}
+										autoFocus
+										autoComplete="email"
+									/>
+									{magicLinkError && (
+										<p className="text-sm text-red-600">{magicLinkError}</p>
+									)}
+								</div>
+								<Button
+									type="submit"
+									className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+									disabled={isSendingLink || !emailInput.trim()}
+								>
+									<SendIcon className="size-4 mr-2" />
+									{isSendingLink ? "Sending..." : "Send Magic Link"}
+								</Button>
+							</form>
+						)}
+					</CardContent>
+				</Card>
+			</div>
+		);
+	}
+
+	if (authStep === "password") {
+		return (
+			<div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50 flex items-center justify-center px-4">
+				<Card className="w-full max-w-md bg-white shadow-xl">
+					<CardHeader className="text-center pb-3">
+						<div className="flex justify-center mb-4">
+							<div className="bg-green-100 p-4 rounded-full">
+								<CheckCircle2Icon className="size-8 text-green-600" />
+							</div>
+						</div>
+						<CardTitle className="text-2xl font-bold text-slate-900">One More Step</CardTitle>
+						<CardDescription className="text-slate-600 mt-2">
+							Magic link verified. Enter your password to continue.
 						</CardDescription>
 					</CardHeader>
 					<CardContent>
@@ -409,7 +533,7 @@ function App() {
 								<Input
 									id="password"
 									type="password"
-									placeholder="Enter password"
+									placeholder="Enter your password"
 									value={passwordInput}
 									onChange={(e) => {
 										setPasswordInput(e.target.value);
@@ -418,10 +542,12 @@ function App() {
 									className={`border-slate-300 focus:border-blue-500 ${passwordError ? "border-red-500 focus:border-red-500" : ""}`}
 									autoFocus
 								/>
-								{passwordError && <p className="text-sm text-red-600">Incorrect password. Please try again.</p>}
+								{passwordError && (
+									<p className="text-sm text-red-600">Incorrect password. Please try again.</p>
+								)}
 							</div>
 							<Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white">
-								Unlock
+								Unlock Vault
 							</Button>
 						</form>
 					</CardContent>
@@ -432,41 +558,42 @@ function App() {
 
 	return (
 		<div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50">
-			<div className="container mx-auto px-4 py-12 max-w-6xl">
+			<div className="container mx-auto px-4 py-6 sm:py-12 max-w-6xl">
 				{/* Header */}
-				<div className="mb-8 text-center relative">
-					<h1 className="text-4xl font-bold text-slate-900 mb-2">
-						{APP_CONFIG.welcomeMessage} {APP_CONFIG.userName}
+				<div className="mb-8 text-center">
+					<h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900 mb-2 px-2">
+						{APP_CONFIG.welcomeMessage}, {APP_CONFIG.userName}
 					</h1>
-					<p className="text-slate-600">{APP_CONFIG.tagline}</p>
+					<p className="text-slate-600 text-sm sm:text-base">{APP_CONFIG.tagline}</p>
 
 					{/* GitHub Status Badge */}
 					{gitHubConfig && (
-						<div className="absolute top-0 right-0">
+						<div className="mt-3 flex justify-center">
 							<Button
 								variant="ghost"
 								size="sm"
 								onClick={handleDisconnectGitHub}
-								className="text-slate-600 hover:text-slate-900"
+								className="text-slate-600 hover:text-slate-900 text-xs"
 								title="Disconnect GitHub"
 							>
-								<GithubIcon className="size-4 mr-2 text-slate-700" />
-								<span className="text-xs">
+								<GithubIcon className="size-4 text-slate-700" />
+								<span className="max-w-[140px] truncate">
 									{gitHubConfig.owner}/{gitHubConfig.repo}
 								</span>
-								<XCircleIcon className="size-3 ml-2" />
+								<XCircleIcon className="size-3" />
 							</Button>
 						</div>
 					)}
 				</div>
 
 				{/* Action Buttons */}
-				<div className="mb-6 flex justify-center gap-3 flex-wrap">
+				<div className="mb-6 flex justify-center gap-2 sm:gap-3 flex-wrap">
 					<Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
 						<DialogTrigger asChild>
 							<Button className="bg-blue-600 hover:bg-blue-700 text-white shadow-md">
 								<PlusIcon className="size-4" />
-								Add New Link
+								<span className="hidden sm:inline">Add New Link</span>
+								<span className="sm:hidden">Add</span>
 							</Button>
 						</DialogTrigger>
 						<DialogContent className="bg-white">
@@ -528,7 +655,8 @@ function App() {
 								className="bg-slate-800 hover:bg-slate-900 text-white shadow-md"
 							>
 								<UploadIcon className="size-4" />
-								{isSyncing ? "Syncing..." : "Sync to GitHub"}
+								<span className="hidden sm:inline">{isSyncing ? "Syncing..." : "Sync to GitHub"}</span>
+								<span className="sm:hidden">{isSyncing ? "..." : "Sync"}</span>
 							</Button>
 							<Button
 								onClick={handleRestoreFromGitHub}
@@ -537,7 +665,8 @@ function App() {
 								className="border-slate-300 text-slate-700 shadow-md"
 							>
 								<DownloadIcon className="size-4" />
-								Restore from GitHub
+								<span className="hidden sm:inline">Restore from GitHub</span>
+								<span className="sm:hidden">Restore</span>
 							</Button>
 						</>
 					) : (
@@ -545,7 +674,8 @@ function App() {
 							<DialogTrigger asChild>
 								<Button variant="outline" className="border-slate-300 text-slate-700 shadow-md">
 									<GithubIcon className="size-4" />
-									Connect GitHub
+									<span className="hidden sm:inline">Connect GitHub</span>
+									<span className="sm:hidden">GitHub</span>
 								</Button>
 							</DialogTrigger>
 							<DialogContent className="bg-white max-w-md">

@@ -127,24 +127,10 @@ function FormControl({ ...props }: React.ComponentProps<typeof Slot>) {
 	const { error, formItemId, formDescriptionId, formMessageId, name } =
 		useFormField();
 
-	// Report form errors to parent window
+	// Log form validation errors to console
 	React.useEffect(() => {
 		if (error) {
-			// Import and use reportElementError dynamically to avoid circular dependencies
-			import("@/sdk/core/internal/creao-shell").then(
-				({ reportElementError }) => {
-					const element = document.getElementById(formItemId) || document.body;
-					reportElementError(element, error, {
-						componentType: "form-control",
-						eventType: "validation-error",
-						componentInfo: {
-							fieldId: formItemId,
-							fieldName: name,
-							errorMessage: error.message || String(error),
-						},
-					});
-				},
-			);
+			console.warn(`Form validation error [${name}]:`, error.message || String(error));
 		}
 	}, [error, formItemId, name]);
 
