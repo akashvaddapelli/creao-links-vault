@@ -1,24 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentSession } from "@/lib/auth";
-import { getLinks, createLink } from "@/lib/links";
+import { getNotes, createNote } from "@/lib/notes";
 
 export async function GET() {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const links = await getLinks(session.userId);
-  return NextResponse.json(links);
+  const notes = await getNotes(session.userId);
+  return NextResponse.json(notes);
 }
 
 export async function POST(req: NextRequest) {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { url, display_name } = await req.json();
-  if (!url || !display_name) {
-    return NextResponse.json({ error: "url and display_name are required" }, { status: 400 });
+  const { title, body } = await req.json();
+  if (!title) {
+    return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
 
-  const link = await createLink(session.userId, { url, display_name });
-  return NextResponse.json(link, { status: 201 });
+  const note = await createNote(session.userId, { title, body: body ?? "" });
+  return NextResponse.json(note, { status: 201 });
 }

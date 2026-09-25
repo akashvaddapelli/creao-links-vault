@@ -1,10 +1,10 @@
 /**
  * Authentication — session-based, no third-party auth service.
  * Single owner: credentials stored in environment variables.
- * Sessions stored in SQLite, token in httpOnly cookie.
+ * Sessions stored in the database, token in an httpOnly cookie.
  */
 
-import { getDb } from "./db";
+import { db } from "./db";
 import { cookies } from "next/headers";
 import crypto from "node:crypto";
 
@@ -20,40 +20,55 @@ export function verifyPassword(password: string): boolean {
   const stored = process.env.AUTH_PASSWORD_HASH;
   if (!stored) {
     // Fallback: compare plaintext (dev only — set AUTH_PASSWORD_HASH in prod)
-    return password === process.env.AUTH_PASSWORD;
+    const expected = process.env.AUTH_PASSWORD;
+    if (!expected) return false;
+    return timingSafeEqualStr(password, expected);
   }
-  return hashPassword(password) === stored;
+  return timingSafeEqualStr(hashPassword(password), stored);
 }
 
-export function createSession(userId: string): string {
-  const db = getDb();
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+export async function createSession(userId: string): Promise<string> {
+  const client = await db();
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = Math.floor((Date.now() + SESSION_TTL_MS) / 1000);
 
-  db.prepare(
-    "INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)"
-  ).run(token, userId, expiresAt);
+  await client.execute({
+    sql: "INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
+    args: [token, userId, expiresAt],
+  });
 
   return token;
 }
 
-export function getSession(token: string): { userId: string } | null {
-  const db = getDb();
-  const row = db
-    .prepare("SELECT user_id, expires_at FROM sessions WHERE token = ?")
-    .get(token) as { user_id: string; expires_at: number } | undefined;
+export async function getSession(token: string): Promise<{ userId: string } | null> {
+  const client = await db();
+  const result = await client.execute({
+    sql: "SELECT user_id, expires_at FROM sessions WHERE token = ?",
+    args: [token],
+  });
 
+  const row = result.rows[0];
   if (!row) return null;
-  if (row.expires_at < Math.floor(Date.now() / 1000)) {
-    db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+
+  const expiresAt = Number(row.expires_at);
+  if (expiresAt < Math.floor(Date.now() / 1000)) {
+    await client.execute({ sql: "DELETE FROM sessions WHERE token = ?", args: [token] });
     return null;
   }
 
-  return { userId: row.user_id };
+  return { userId: String(row.user_id) };
 }
 
-export function deleteSession(token: string): void {
-  getDb().prepare("DELETE FROM sessions WHERE token = ?").run(token);
+export async function deleteSession(token: string): Promise<void> {
+  const client = await db();
+  await client.execute({ sql: "DELETE FROM sessions WHERE token = ?", args: [token] });
 }
 
 /** Server-side: get current session from cookie */

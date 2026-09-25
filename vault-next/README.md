@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vault
 
-## Getting Started
+A single-owner personal vault — store links, notes, passwords, and files, and
+reach them from any device, anywhere. Built on Next.js with a libSQL/Turso
+database and Cloudflare R2 for file storage.
 
-First, run the development server:
+## How it's designed
+
+- **Disguised entry.** The landing page looks like a generic "Application error"
+  crash. Nobody who lands on it sees a login. Typing your secret unlock phrase
+  anywhere on the page reveals a plain password field. A wrong password silently
+  reverts to the fake-broken screen — no error, no hint that anything is there.
+  This is obfuscation, not the security boundary: the real gate is the
+  server-verified password.
+- **Password-only auth.** No magic link, no email dependency — so a dead phone or
+  locked inbox never blocks access. The password is checked server-side; a session
+  cookie (httpOnly) keeps you logged in for 7 days.
+- **Encrypted password vault.** Stored password secrets are AES-256-GCM encrypted
+  at rest with a key derived from your master password. A leaked database file
+  alone can't reveal them. (Labels and usernames are stored in the clear so the
+  list is searchable.)
+- **Files never touch the server.** Uploads/downloads go directly between your
+  browser and R2 via short-lived presigned URLs, so file size isn't limited by
+  serverless request limits.
+
+## Local development
 
 ```bash
+cp .env.local.example .env.local   # then edit the values
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+With `TURSO_DATABASE_URL` unset, the app falls back to a local SQLite file at
+`./data/vault.db` — no external services needed to try it. File upload still
+needs R2 credentials to work; everything else (links, notes, passwords) works
+fully offline.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Open http://localhost:3000, type your `NEXT_PUBLIC_UNLOCK_PHRASE`, then your
+`AUTH_PASSWORD`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploying (free tier, always-on, no card)
 
-## Learn More
+1. **Turso** (database): create a free database, copy its URL + auth token into
+   `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`.
+2. **Cloudflare R2** (files): create a bucket and an S3-API token; fill in
+   `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`.
+   Add a CORS rule on the bucket allowing `PUT` and `GET` from your Vercel domain.
+3. **Vercel** (hosting): import the repo, set all the env vars from
+   `.env.local.example` in the project settings, and deploy.
 
-To learn more about Next.js, take a look at the following resources:
+## Important limitations
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Changing `AUTH_PASSWORD` breaks existing password entries.** The vault
+  encryption key is derived from `AUTH_PASSWORD` + `VAULT_KEY_SALT`. If you change
+  either after entries exist, those entries can no longer be decrypted. There is
+  no in-app password-change flow because `AUTH_PASSWORD` lives in the host's env
+  vars, which the app can't rewrite. Pick your password and salt before storing
+  real secrets.
+- **Single owner.** Everything is scoped to one hardcoded owner id. There is no
+  multi-user support by design.

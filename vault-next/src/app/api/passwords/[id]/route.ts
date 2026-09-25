@@ -1,20 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentSession } from "@/lib/auth";
-import { updateLink, deleteLink } from "@/lib/links";
+import { updatePasswordEntry, deletePasswordEntry } from "@/lib/passwords";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const { url, display_name } = await req.json();
-  if (!url || !display_name) {
-    return NextResponse.json({ error: "url and display_name are required" }, { status: 400 });
+  const { label, username, secret, notes } = await req.json();
+  if (!label || !secret) {
+    return NextResponse.json({ error: "label and secret are required" }, { status: 400 });
   }
 
-  const link = await updateLink(id, session.userId, { url, display_name });
-  if (!link) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(link);
+  const entry = await updatePasswordEntry(id, session.userId, {
+    label,
+    username: username ?? "",
+    secret,
+    notes: notes ?? "",
+  });
+  if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(entry);
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -22,7 +27,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const deleted = await deleteLink(id, session.userId);
+  const deleted = await deletePasswordEntry(id, session.userId);
   if (!deleted) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

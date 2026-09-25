@@ -1,65 +1,151 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "@/lib/api-client";
+import Dashboard from "@/components/Dashboard";
+
+// The unlock phrase is public-ish by nature (it only reveals a password
+// field — the real security boundary is the server-verified password).
+const UNLOCK_PHRASE = (process.env.NEXT_PUBLIC_UNLOCK_PHRASE || "").toLowerCase();
+
+type View = "loading" | "broken" | "password" | "dashboard";
+
+export default function Page() {
+  const [view, setView] = useState<View>("loading");
+
+  // Check for an existing session on load.
+  useEffect(() => {
+    let alive = true;
+    api
+      .checkSession()
+      .then(({ authenticated }) => {
+        if (alive) setView(authenticated ? "dashboard" : "broken");
+      })
+      .catch(() => {
+        if (alive) setView("broken");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (view === "loading" || view === "broken") {
+    return <BrokenScreen active={view === "broken"} onUnlock={() => setView("password")} />;
+  }
+  if (view === "password") {
+    return (
+      <PasswordScreen
+        onSuccess={() => setView("dashboard")}
+        onFail={() => setView("broken")}
+      />
+    );
+  }
+  return <Dashboard onLogout={() => { api.logout().finally(() => setView("broken")); }} />;
+}
+
+/**
+ * Disguise screen. Looks like a genuine Next.js production crash so a
+ * random visitor assumes the deployment is simply broken. When `active`,
+ * it listens for the unlock phrase typed anywhere on the page.
+ */
+function BrokenScreen({ active, onUnlock }: { active: boolean; onUnlock: () => void }) {
+  const buffer = useRef("");
+
+  const handler = useCallback(
+    (e: KeyboardEvent) => {
+      if (!UNLOCK_PHRASE) return;
+      if (e.key.length === 1) {
+        buffer.current = (buffer.current + e.key).toLowerCase().slice(-UNLOCK_PHRASE.length);
+        if (buffer.current === UNLOCK_PHRASE) {
+          buffer.current = "";
+          onUnlock();
+        }
+      }
+    },
+    [onUnlock]
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active, handler]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div
+      style={{
+        fontFamily:
+          'system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"',
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#000",
+        background: "#fff",
+        textAlign: "center",
+        padding: "0 16px",
+      }}
+    >
+      <div>
+        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Application error</h1>
+        <p style={{ fontSize: 14, color: "#666", marginTop: 8 }}>
+          a client-side exception has occurred (see the browser console for more information).
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Password entry. Deliberately plain — no "Sign in" branding. A wrong
+ * password reverts to the broken screen with no distinguishing feedback.
+ */
+function PasswordScreen({ onSuccess, onFail }: { onSuccess: () => void; onFail: () => void }) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.login(password);
+      onSuccess();
+    } catch {
+      // No error signal — indistinguishable from an untriggered visitor.
+      onFail();
+    }
+  };
+
+  return (
+    <div
+      style={{
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#fff",
+        padding: "0 16px",
+      }}
+    >
+      <form onSubmit={submit} style={{ width: "100%", maxWidth: 320 }}>
+        <input
+          type="password"
+          autoFocus
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            fontSize: 14,
+            border: "1px solid #ddd",
+            borderRadius: 8,
+            outline: "none",
+            boxSizing: "border-box",
+          }}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </form>
     </div>
   );
 }
