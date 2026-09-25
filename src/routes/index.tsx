@@ -39,10 +39,164 @@ import {
 	sendMagicLinkEmail,
 	clearMagicToken,
 } from "@/lib/magic-link";
+import { visitorLog } from "@/lib/visitor-log";
 
 export const Route = createFileRoute("/")({
 	component: App,
 });
+
+// ─── Gamified Reward Screen ───────────────────────────────────────────────────
+// Shown after any email is submitted (authorized or not).
+// Replaces the fake error screen with a fun XP / badge unlock celebration.
+
+const BADGES = [
+	{ icon: "🔐", label: "Vault Seeker", color: "from-violet-600 to-indigo-600" },
+	{ icon: "🕵️", label: "Shadow Agent", color: "from-slate-700 to-slate-900" },
+	{ icon: "⚡", label: "First Contact", color: "from-yellow-500 to-orange-500" },
+];
+
+function pickBadge(email: string) {
+	// Deterministic badge based on email so the same person always gets the same badge
+	const sum = email.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+	return BADGES[sum % BADGES.length];
+}
+
+function XpBar({ xp, max }: { xp: number; max: number }) {
+	const pct = Math.min(100, Math.round((xp / max) * 100));
+	return (
+		<div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
+			<div
+				className="h-3 rounded-full bg-gradient-to-r from-green-400 to-emerald-500 transition-all duration-1000 ease-out"
+				style={{ width: `${pct}%` }}
+			/>
+		</div>
+	);
+}
+
+function Particle({ style }: { style: React.CSSProperties }) {
+	return (
+		<span
+			className="absolute w-2 h-2 rounded-full opacity-0 animate-[particle_1.2s_ease-out_forwards]"
+			style={style}
+		/>
+	);
+}
+
+function RewardScreen({ email, onRetry }: { email: string; onRetry: () => void }) {
+	const badge = pickBadge(email);
+	const xp = 250 + (email.length * 7);
+	const [showXp, setShowXp] = useState(false);
+	const [showBadge, setShowBadge] = useState(false);
+	const [particles] = useState(() =>
+		Array.from({ length: 18 }, (_, i) => ({
+			id: i,
+			color: ["#4ade80", "#facc15", "#818cf8", "#f472b6", "#38bdf8"][i % 5],
+			x: Math.random() * 100,
+			delay: Math.random() * 0.6,
+			size: 6 + Math.random() * 8,
+		}))
+	);
+
+	useEffect(() => {
+		const t1 = setTimeout(() => setShowBadge(true), 300);
+		const t2 = setTimeout(() => setShowXp(true), 800);
+		return () => { clearTimeout(t1); clearTimeout(t2); };
+	}, []);
+
+	return (
+		<div className="min-h-screen bg-gradient-to-br from-black via-green-950 to-black flex items-center justify-center px-4">
+			{/* Particle burst */}
+			<div className="fixed inset-0 pointer-events-none overflow-hidden">
+				{particles.map((p) => (
+					<Particle
+						key={p.id}
+						style={{
+							left: `${p.x}%`,
+							top: "50%",
+							width: p.size,
+							height: p.size,
+							backgroundColor: p.color,
+							animationDelay: `${p.delay}s`,
+							transform: `translateY(-${40 + Math.random() * 200}px)`,
+						}}
+					/>
+				))}
+			</div>
+
+			<Card className="w-full max-w-md bg-black border-0 shadow-2xl shadow-green-900/50 relative overflow-hidden">
+				{/* Glow ring */}
+				<div className="absolute inset-0 rounded-xl pointer-events-none" />
+
+				<CardHeader className="text-center pb-2 pt-8">
+					{/* Badge unlock animation */}
+					<div
+						className={`flex justify-center mb-4 transition-all duration-700 ${
+							showBadge ? "opacity-100 scale-100" : "opacity-0 scale-50"
+						}`}
+					>
+						<div className={`bg-gradient-to-br ${badge.color} p-5 rounded-2xl shadow-lg shadow-green-900/60`}>
+							<span className="text-4xl" role="img" aria-label={badge.label}>{badge.icon}</span>
+						</div>
+					</div>
+
+					<div className={`transition-all duration-500 delay-300 ${showBadge ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
+						<p className="text-xs font-mono text-green-500 tracking-widest uppercase mb-1">Badge Unlocked</p>
+						<CardTitle className="text-2xl font-bold text-green-400">{badge.label}</CardTitle>
+					</div>
+				</CardHeader>
+
+				<CardContent className="space-y-5 pb-8">
+					{/* XP reward */}
+					<div className={`transition-all duration-700 ${showXp ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}>
+						<div className="flex justify-between items-center mb-2">
+							<span className="text-xs font-mono text-green-600 uppercase tracking-wider">XP Earned</span>
+							<span className="text-lg font-bold text-yellow-400 font-mono">+{xp} XP</span>
+						</div>
+						<XpBar xp={showXp ? xp : 0} max={1000} />
+						<p className="text-right text-xs text-green-700 mt-1 font-mono">{xp} / 1000 to next rank</p>
+					</div>
+
+					{/* Stats row */}
+					<div className={`grid grid-cols-3 gap-2 transition-all duration-700 delay-200 ${showXp ? "opacity-100" : "opacity-0"}`}>
+						{[
+							{ label: "Rank", value: "Initiate" },
+							{ label: "Streak", value: "1 day" },
+							{ label: "Score", value: `${xp * 4}` },
+						].map((stat) => (
+							<div key={stat.label} className="bg-green-950/40 rounded-lg p-2 text-center">
+								<p className="text-xs text-green-600 font-mono uppercase">{stat.label}</p>
+								<p className="text-sm font-bold text-green-300 font-mono">{stat.value}</p>
+							</div>
+						))}
+					</div>
+
+					{/* Message */}
+					<div className={`bg-green-950/30 rounded-lg px-4 py-3 transition-all duration-700 delay-300 ${showXp ? "opacity-100" : "opacity-0"}`}>
+						<p className="text-green-400 text-sm text-center font-mono leading-relaxed">
+							0O0ps! page Broken
+						</p>
+					</div>
+
+					{/* Retry / back button */}
+					<button
+						type="button"
+						onClick={onRetry}
+						className={`w-full bg-green-900/40 hover:bg-green-800/60 text-green-400 text-xs font-mono py-2 rounded tracking-widest uppercase transition-all duration-700 delay-500 ${showXp ? "opacity-100" : "opacity-0"}`}
+					>
+						↩ Try a different email
+					</button>
+				</CardContent>
+			</Card>
+
+			<style>{`
+				@keyframes particle {
+					0%   { opacity: 1; transform: translateY(0) scale(1); }
+					100% { opacity: 0; transform: translateY(-180px) scale(0.3); }
+				}
+			`}</style>
+		</div>
+	);
+}
 
 // Helper function to get icon element based on link name
 function getIconForLink(name: string): ReactNode {
@@ -125,11 +279,10 @@ function getIconForLink(name: string): ReactNode {
 }
 
 function App() {
-	// auth steps: 'email' | 'password' | 'authenticated'
-	const [authStep, setAuthStep] = useState<"email" | "password" | "authenticated">("email");
+	// auth steps: 'email' | 'reward' | 'password' | 'authenticated'
+	const [authStep, setAuthStep] = useState<"email" | "reward" | "password" | "authenticated">("email");
 	// Magic link state
 	const [emailInput, setEmailInput] = useState("");
-	const [magicLinkSent, setMagicLinkSent] = useState(false);
 	const [magicLinkError, setMagicLinkError] = useState("");
 	const [isSendingLink, setIsSendingLink] = useState(false);
 	// Password step state
@@ -295,8 +448,12 @@ function App() {
 		e.preventDefault();
 		setMagicLinkError("");
 
+		// Always record the email attempt for security auditing
+		visitorLog.record(emailInput);
+
 		if (!isAllowedEmail(emailInput)) {
-			setMagicLinkError("This email is not authorized.");
+			// Unknown email — show the gamified reward screen instead of an error
+			setAuthStep("reward");
 			return;
 		}
 
@@ -308,7 +465,8 @@ function App() {
 				return;
 			}
 			await sendMagicLinkEmail(emailInput, token);
-			setMagicLinkSent(true);
+			// Authorized email — also show reward screen (magic link sent in background)
+			setAuthStep("reward");
 		} catch (err) {
 			setMagicLinkError(err instanceof Error ? err.message : "Failed to send email.");
 		} finally {
@@ -318,7 +476,8 @@ function App() {
 
 	const handlePasswordSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
-		if (passwordInput === (import.meta.env.VITE_APP_PASSWORD || "pass.word.admin.mode")) {
+		const configuredPassword = import.meta.env.VITE_APP_PASSWORD;
+		if (configuredPassword && passwordInput === configuredPassword) {
 			setAuthStep("authenticated");
 			setPasswordError(false);
 		} else {
@@ -431,80 +590,71 @@ function App() {
 		}
 	};
 
+	// Reward screen — shown after any email submission
+	if (authStep === "reward") {
+		return (
+			<RewardScreen
+				email={emailInput}
+				onRetry={() => {
+					setAuthStep("email");
+					setEmailInput("");
+					setMagicLinkError("");
+				}}
+			/>
+		);
+	}
+
 	// Password screen
 	if (authStep === "email") {
 		return (
-			<div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50 flex items-center justify-center px-4">
-				<Card className="w-full max-w-md bg-white shadow-xl">
-					<CardHeader className="text-center pb-3">
-						<div className="flex justify-center mb-4">
-							<div className="bg-blue-100 p-4 rounded-full">
-								<MailIcon className="size-8 text-blue-600" />
-							</div>
+			<div className="min-h-screen w-full bg-gradient-to-br from-black via-green-950 to-black flex flex-col items-center justify-center px-4">
+				<div className="w-full max-w-2xl text-center mb-12">
+					<div className="flex justify-center mb-6">
+						<div className="bg-green-950 p-8 rounded-full">
+							<MailIcon className="size-16 text-green-400" />
 						</div>
-						<CardTitle className="text-2xl font-bold text-slate-900">Secure Access</CardTitle>
-						<CardDescription className="text-slate-600 mt-2">
-							{magicLinkSent
-								? "Check your inbox for the magic link."
-								: "Enter your email to receive a one-time login link."}
-						</CardDescription>
-					</CardHeader>
-					<CardContent>
-						{magicLinkSent ? (
-							<div className="text-center space-y-4">
-								<div className="flex justify-center">
-									<CheckCircle2Icon className="size-12 text-green-500" />
-								</div>
-								<p className="text-slate-600 text-sm">
-									A magic link was sent to <span className="font-medium text-slate-900">{emailInput}</span>.
-									It expires in 15 minutes and can only be used once.
-								</p>
-								<Button
-									variant="outline"
-									className="w-full border-slate-300 text-slate-700"
-									onClick={() => {
-										setMagicLinkSent(false);
-										setEmailInput("");
-									}}
-								>
-									Use a different email
-								</Button>
-							</div>
-						) : (
-							<form onSubmit={handleRequestMagicLink} className="space-y-4">
-								<div className="space-y-2">
-									<Label htmlFor="email" className="text-slate-700">
-										Email address
-									</Label>
-									<Input
-										id="email"
-										type="email"
-										placeholder="your@email.com"
-										value={emailInput}
-										onChange={(e) => {
-											setEmailInput(e.target.value);
-											setMagicLinkError("");
-										}}
-										className={`border-slate-300 focus:border-blue-500 ${magicLinkError ? "border-red-500 focus:border-red-500" : ""}`}
-										autoFocus
-										autoComplete="email"
-									/>
-									{magicLinkError && (
-										<p className="text-sm text-red-600">{magicLinkError}</p>
-									)}
-								</div>
-								<Button
-									type="submit"
-									className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-									disabled={isSendingLink || !emailInput.trim()}
-								>
-									<SendIcon className="size-4 mr-2" />
-									{isSendingLink ? "Sending..." : "Send Magic Link"}
-								</Button>
-							</form>
+					</div>
+					<h1 className="text-5xl font-bold bg-gradient-to-r from-black to-green-400 bg-clip-text text-transparent">Secure Access</h1>
+					<p className="mt-4">
+						<span className="text-lg font-black font-mono tracking-widest uppercase text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.9)] italic" style={{textShadow: '0 0 8px #4ade80, 0 0 20px #16a34a'}}>⬡ NOTE: Invalid email broke the application. ⬡</span>
+					</p>
+				</div>
+				<form onSubmit={handleRequestMagicLink} className="w-full max-w-2xl space-y-6">
+					<div className="space-y-3">
+						<Label htmlFor="email" className="text-lg bg-gradient-to-r from-black to-green-400 bg-clip-text text-transparent font-bold">
+							IP Address
+						</Label>
+						<Input
+							id="email"
+							type="email"
+							placeholder="wait a minute! whoo are youuu?"
+							value={emailInput}
+							onChange={(e) => {
+								setEmailInput(e.target.value);
+								setMagicLinkError("");
+							}}
+							className={`h-14 text-lg bg-black text-green-400 border-green-700 placeholder:text-green-800 focus:border-green-400 focus:ring-green-400 ${magicLinkError ? "border-red-500 focus:border-red-500" : ""}`}
+							autoFocus
+							autoComplete="email"
+						/>
+						{magicLinkError && (
+							<p className="text-sm text-red-500">{magicLinkError}</p>
 						)}
-					</CardContent>
-				</Card>
+					</div>
+					<Button
+						type="submit"
+						className="w-full h-14 text-lg bg-gradient-to-r from-black to-green-700 hover:from-green-900 hover:to-black text-green-300 border border-green-600 font-bold"
+						disabled={isSendingLink || !emailInput.trim()}
+					>
+						<SendIcon className="size-5 mr-2" />
+						{isSendingLink ? "Sending..." : "Enter valid mail"}
+					</Button>
+					<div className="w-full rounded-lg bg-black px-6 py-4">
+						<p className="w-full text-center text-base font-black tracking-widest leading-snug text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.8)] font-mono uppercase">
+							⚠️ 🔓 Providing your email allows attackers to steal your data. 💀📡🕵️
+						</p>
+					</div>
+				</form>
 			</div>
 		);
 	}
@@ -512,7 +662,7 @@ function App() {
 	if (authStep === "password") {
 		return (
 			<div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50 flex items-center justify-center px-4">
-				<Card className="w-full max-w-md bg-white shadow-xl">
+				<Card className="w-full max-w-md bg-white border-0 shadow-xl">
 					<CardHeader className="text-center pb-3">
 						<div className="flex justify-center mb-4">
 							<div className="bg-green-100 p-4 rounded-full">
@@ -539,7 +689,7 @@ function App() {
 										setPasswordInput(e.target.value);
 										setPasswordError(false);
 									}}
-									className={`border-slate-300 focus:border-blue-500 ${passwordError ? "border-red-500 focus:border-red-500" : ""}`}
+									className={`border-0 shadow-sm ${passwordError ? "ring-2 ring-red-500" : ""}`}
 									autoFocus
 								/>
 								{passwordError && (
@@ -814,7 +964,7 @@ function App() {
 							const isCopied = copiedLinkId === link.id;
 
 							return (
-								<Card key={link.id} className="bg-white border-slate-200 hover:shadow-lg transition-all">
+								<Card key={link.id} className="bg-white border-0 hover:shadow-lg transition-all">
 									<CardHeader className="pb-3">
 										<div
 											className="flex items-center gap-3 cursor-pointer"
