@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentSession } from "@/lib/auth";
-import { makeStorageKey, presignUpload } from "@/lib/storage";
+import {
+  makeStorageKey,
+  presignUpload,
+  isStorageConfigured,
+  STORAGE_NOT_CONFIGURED_MESSAGE,
+} from "@/lib/storage";
 
 export async function POST(req: NextRequest) {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  if (!isStorageConfigured()) {
+    return NextResponse.json({ error: STORAGE_NOT_CONFIGURED_MESSAGE }, { status: 503 });
+  }
 
   const { filename, mime_type } = await req.json();
   if (!filename || !mime_type) {

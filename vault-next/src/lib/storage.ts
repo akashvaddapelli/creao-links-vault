@@ -35,6 +35,19 @@ function requireEnv(name: string): string {
   return v;
 }
 
+/** True only when all R2 credentials are present. */
+export function isStorageConfigured(): boolean {
+  return Boolean(
+    process.env.R2_ACCOUNT_ID &&
+      process.env.R2_ACCESS_KEY_ID &&
+      process.env.R2_SECRET_ACCESS_KEY &&
+      process.env.R2_BUCKET_NAME
+  );
+}
+
+export const STORAGE_NOT_CONFIGURED_MESSAGE =
+  "File storage isn't set up yet. Add your Cloudflare R2 credentials to enable uploads and downloads.";
+
 function bucket(): string {
   return requireEnv("R2_BUCKET_NAME");
 }
